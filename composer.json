@@ -1,0 +1,52 @@
+{
+    "name": "wiserwebsolutions/laravel-lobbyist-legiscan",
+    "description": "Default nationwide LegiScan API driver for the laravel-lobbyist package.",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Daniel Wiser",
+            "email": "dan@wiser.ws"
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "illuminate/support": "^11.0|^12.0",
+        "illuminate/http": "^11.0|^12.0",
+        "spatie/laravel-data": "^4.20",
+        "wiserwebsolutions/laravel-lobbyist": "*"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^9.0|^10.0",
+        "phpunit/phpunit": "^10.5|^11.0",
+        "mockery/mockery": "^1.6"
+    },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../laravel-lobbyist",
+            "options": {
+                "symlink": true
+            }
+        }
+    ],
+    "autoload": {
+        "psr-4": {
+            "WiserWebSolutions\\Lobbyist\\Legiscan\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "WiserWebSolutions\\Lobbyist\\Legiscan\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "WiserWebSolutions\\Lobbyist\\Legiscan\\LegiscanServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
