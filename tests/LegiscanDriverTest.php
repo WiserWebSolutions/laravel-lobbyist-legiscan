@@ -28,7 +28,7 @@ class LegiscanDriverTest extends TestCase
             ]),
         ]);
 
-        $sessions = $this->driver()->setStateContext('PA')->listSessions();
+        $sessions = $this->driver()->setStateContext('PA')->sessions();
 
         $this->assertCount(1, $sessions);
         $this->assertSame(1791, $sessions->first()->id);
@@ -47,7 +47,7 @@ class LegiscanDriverTest extends TestCase
             ]),
         ]);
 
-        $bills = $this->driver()->setStateContext('PA')->listBills();
+        $bills = $this->driver()->setStateContext('PA')->bills();
 
         $this->assertCount(2, $bills);
         $this->assertContainsOnlyInstancesOf(Bill::class, $bills);
@@ -62,7 +62,7 @@ class LegiscanDriverTest extends TestCase
             ]),
         ]);
 
-        $bill = $this->driver()->getBill(1132030);
+        $bill = $this->driver()->bill(1132030);
 
         $this->assertInstanceOf(Bill::class, $bill);
         $this->assertSame('AB1', $bill->number);
@@ -75,7 +75,7 @@ class LegiscanDriverTest extends TestCase
         $this->expectException(LegiscanException::class);
         $this->expectExceptionMessageMatches('/State context is required/');
 
-        $this->driver()->getBill('HB1');
+        $this->driver()->bill('HB1');
     }
 
     public function test_get_vote_maps_roll_call(): void
@@ -86,7 +86,7 @@ class LegiscanDriverTest extends TestCase
             ]),
         ]);
 
-        $vote = $this->driver()->getVote(55);
+        $vote = $this->driver()->vote(55);
 
         $this->assertInstanceOf(Vote::class, $vote);
         $this->assertSame(60, $vote->yea);
@@ -99,7 +99,7 @@ class LegiscanDriverTest extends TestCase
 
         $this->expectException(LegiscanException::class);
 
-        $this->driver()->getVote('abc');
+        $this->driver()->vote('abc');
     }
 
     public function test_list_representatives_resolves_session_then_people(): void
@@ -120,7 +120,7 @@ class LegiscanDriverTest extends TestCase
             ]),
         ]);
 
-        $reps = $this->driver()->setStateContext('PA')->listRepresentatives();
+        $reps = $this->driver()->setStateContext('PA')->representatives();
 
         $this->assertCount(2, $reps);
         $this->assertContainsOnlyInstancesOf(Legislator::class, $reps);
@@ -135,7 +135,7 @@ class LegiscanDriverTest extends TestCase
             ]),
         ]);
 
-        $rep = $this->driver()->getRepresentative(9);
+        $rep = $this->driver()->representative(9);
 
         $this->assertSame('Jane Doe', $rep->name);
         $this->assertSame(StateEnum::PA, $rep->state);
@@ -150,7 +150,24 @@ class LegiscanDriverTest extends TestCase
         $this->expectException(LegiscanException::class);
         $this->expectExceptionMessageMatches('/Invalid API Key/');
 
-        $this->driver()->listSessions();
+        $this->driver()->sessions();
+    }
+
+    public function test_http_failure_throws_with_redacted_url(): void
+    {
+        Http::fake([
+            'api.legiscan.test/*' => Http::response('server error', 500),
+        ]);
+
+        try {
+            $this->driver()->sessions();
+            $this->fail('Expected a LegiscanException.');
+        } catch (LegiscanException $e) {
+            $this->assertStringContainsString('api.legiscan.test', $e->getMessage());
+            $this->assertStringContainsString('op=getSessionList', $e->getMessage());
+            $this->assertStringContainsString('key=REDACTED', $e->getMessage());
+            $this->assertStringNotContainsString('test-key', $e->getMessage());
+        }
     }
 
     public function test_missing_api_key_throws_on_construct(): void
@@ -174,8 +191,8 @@ class LegiscanDriverTest extends TestCase
         ]);
 
         $driver = $this->driver()->setStateContext('PA');
-        $driver->listSessions();
-        $driver->listSessions();
+        $driver->sessions();
+        $driver->sessions();
 
         Http::assertSentCount(1);
     }
@@ -186,7 +203,7 @@ class LegiscanDriverTest extends TestCase
             'getSessionList' => $this->okResponse(['sessions' => []]),
         ]);
 
-        $this->driver()->setStateContext('PA')->listSessions();
+        $this->driver()->setStateContext('PA')->sessions();
 
         Http::assertSent(function ($request) {
             parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);

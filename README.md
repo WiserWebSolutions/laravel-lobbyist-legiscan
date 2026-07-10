@@ -44,20 +44,20 @@ use WiserWebSolutions\Lobbyist\Facades\Lobbyist;
 
 $driver = Lobbyist::state('CA'); // LegiscanDriver, scoped to California
 
-$driver->listSessions();          // SessionCollection
-$driver->listBills();             // BillCollection (current CA session master list)
-$driver->getBill(1132030);        // Bill (by LegiScan bill_id)
-$driver->getBill('AB1');          // Bill (by number — requires state context)
-$driver->getVote(55);             // Vote (by roll_call_id)
-$driver->listRepresentatives();   // LegislatorCollection (current session people)
-$driver->getRepresentative(9001); // Legislator (by people_id)
+$driver->sessions();          // SessionCollection
+$driver->bills();             // BillCollection (current CA session master list)
+$driver->bill(1132030);       // Bill (by LegiScan bill_id)
+$driver->bill('AB1');         // Bill (by number — requires state context)
+$driver->vote(55);            // Vote (by roll_call_id)
+$driver->representatives();   // LegislatorCollection (current session people)
+$driver->representative(9001); // Legislator (by people_id)
 ```
 
 ### Supported capabilities
 
 LegiScan supports every capability **except** `ListVotes` — the API has no cheap
 "all votes for a state" operation (roll calls are reached per bill or by id), so
-this driver implements `VoteLookup` (`getVote`) but not `VoteProvider`.
+this driver implements `VoteLookup` (`vote($id)`) but not `VoteProvider`.
 
 ## Testing
 

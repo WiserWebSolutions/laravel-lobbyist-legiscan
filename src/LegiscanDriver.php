@@ -2,7 +2,9 @@
 
 namespace WiserWebSolutions\Lobbyist\Legiscan;
 
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\BillLookup;
@@ -69,7 +71,7 @@ class LegiscanDriver extends AbstractDriver implements
     // Public contract
     // ---------------------------------------------------------------------
 
-    public function listSessions(): SessionCollection
+    public function sessions(): SessionCollection
     {
         $response = $this->getSessionList();
 
@@ -81,7 +83,7 @@ class LegiscanDriver extends AbstractDriver implements
         );
     }
 
-    public function listBills(): BillCollection
+    public function bills(): BillCollection
     {
         $response = $this->getMasterList();
 
@@ -94,7 +96,7 @@ class LegiscanDriver extends AbstractDriver implements
         return new BillCollection($bills);
     }
 
-    public function getBill(string|int $identifier): Bill
+    public function bill(string|int $identifier): Bill
     {
         $response = is_numeric($identifier)
             ? $this->fetchBillById((int) $identifier)
@@ -103,7 +105,7 @@ class LegiscanDriver extends AbstractDriver implements
         return LegiscanMapper::bill($response['bill']);
     }
 
-    public function getVote(string|int $identifier): Vote
+    public function vote(string|int $identifier): Vote
     {
         if (! is_numeric($identifier)) {
             throw LegiscanException::apiError('Roll call identifier must be numeric.');
@@ -114,7 +116,7 @@ class LegiscanDriver extends AbstractDriver implements
         return LegiscanMapper::vote($response['roll_call']);
     }
 
-    public function listRepresentatives(): LegislatorCollection
+    public function representatives(): LegislatorCollection
     {
         $sessionId = $this->currentSessionId();
 
@@ -133,7 +135,7 @@ class LegiscanDriver extends AbstractDriver implements
         );
     }
 
-    public function getRepresentative(string|int $identifier): Legislator
+    public function representative(string|int $identifier): Legislator
     {
         if (! is_numeric($identifier)) {
             throw LegiscanException::apiError('Person identifier must be numeric.');
@@ -211,7 +213,7 @@ class LegiscanDriver extends AbstractDriver implements
      */
     private function currentSessionId(): int
     {
-        $sessions = $this->listSessions();
+        $sessions = $this->sessions();
 
         $current = $sessions->active()->first() ?? $sessions->first();
 
@@ -254,20 +256,45 @@ class LegiscanDriver extends AbstractDriver implements
 
     protected function send(array $query): array
     {
-        $response = $this->http()->get('/', $query);
-        $response->throw();
+        $url = $this->attemptedUrl($query);
+
+        try {
+            $response = $this->http()->get('/', $query);
+        } catch (RequestException $e) {
+            throw LegiscanException::requestFailed($url, $e->response?->status(), 'The LegiScan API returned an error response.', $e);
+        } catch (ConnectionException $e) {
+            throw LegiscanException::requestFailed($url, null, 'Could not connect to the LegiScan API.', $e);
+        }
+
+        if ($response->failed()) {
+            throw LegiscanException::requestFailed($url, $response->status());
+        }
 
         $json = $response->json();
 
         if (! is_array($json)) {
-            throw LegiscanException::apiError('Invalid JSON response');
+            throw LegiscanException::apiError("Invalid (non-JSON) response from [{$url}].");
         }
 
         if (($json['status'] ?? null) !== 'OK') {
-            throw LegiscanException::apiError($json['alert']['message'] ?? 'Unknown error');
+            $message = $json['alert']['message'] ?? 'Unknown error';
+            throw LegiscanException::apiError("{$message} (request: [{$url}]).");
         }
 
         return $json;
+    }
+
+    /**
+     * The request URL for diagnostics, with the API key redacted so it is safe
+     * to surface in exceptions and logs.
+     */
+    private function attemptedUrl(array $query): string
+    {
+        if (isset($query['key'])) {
+            $query['key'] = 'REDACTED';
+        }
+
+        return rtrim((string) $this->endpoint['base_uri'], '/').'/?'.http_build_query($query);
     }
 
     private function requireResponseKey(array $response, string $operation, string $key): array
