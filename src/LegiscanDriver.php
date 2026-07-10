@@ -226,17 +226,7 @@ class LegiscanDriver extends AbstractDriver implements
      */
     private function currentSessionId(): int
     {
-        $sessions = $this->sessions();
-
-        $current = $sessions->active()->first() ?? $sessions->first();
-
-        if ($current === null) {
-            throw LegiscanException::apiError(
-                'No sessions available for state ['.($this->stateContext ?? 'US').'].'
-            );
-        }
-
-        return $current->id;
+        return $this->session()->id;
     }
 
     // ---------------------------------------------------------------------

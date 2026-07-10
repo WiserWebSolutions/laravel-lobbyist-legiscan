@@ -35,6 +35,34 @@ class LegiscanDriverTest extends TestCase
         $this->assertSame(StateEnum::PA, $sessions->first()->state);
     }
 
+    public function test_session_returns_the_most_recent_active_session(): void
+    {
+        $this->fakeLegiscan([
+            'getSessionList' => $this->okResponse([
+                'sessions' => [
+                    ['session_id' => 1791, 'state_id' => 38, 'prior' => 1, 'session_title' => 'Old Session'],
+                    ['session_id' => 2000, 'state_id' => 38, 'prior' => 0, 'sine_die' => 0, 'session_title' => 'Current Session'],
+                ],
+            ]),
+        ]);
+
+        $session = $this->driver()->setStateContext('PA')->session();
+
+        $this->assertSame(2000, $session->id);
+        $this->assertSame('Current Session', $session->title);
+    }
+
+    public function test_session_throws_when_no_sessions_are_available(): void
+    {
+        $this->fakeLegiscan([
+            'getSessionList' => $this->okResponse(['sessions' => []]),
+        ]);
+
+        $this->expectExceptionMessageMatches('/No sessions available/');
+
+        $this->driver()->setStateContext('PA')->session();
+    }
+
     public function test_list_bills_maps_and_ignores_non_bill_rows(): void
     {
         $this->fakeLegiscan([
