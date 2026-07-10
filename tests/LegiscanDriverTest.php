@@ -4,6 +4,7 @@ namespace WiserWebSolutions\Lobbyist\Legiscan\Tests;
 
 use Illuminate\Support\Facades\Http;
 use WiserWebSolutions\Lobbyist\Data\Bill;
+use WiserWebSolutions\Lobbyist\Data\BillText;
 use WiserWebSolutions\Lobbyist\Data\Legislator;
 use WiserWebSolutions\Lobbyist\Data\Vote;
 use WiserWebSolutions\Lobbyist\Enums\Chamber;
@@ -114,6 +115,77 @@ class LegiscanDriverTest extends TestCase
         $this->expectExceptionMessageMatches('/State context is required/');
 
         $this->driver()->bill('HB1');
+    }
+
+    public function test_bill_text_history_maps_every_version_without_content(): void
+    {
+        $this->fakeLegiscan([
+            'getBill' => $this->okResponse([
+                'bill' => [
+                    'bill_id' => 1132030,
+                    'number' => 'AB1',
+                    'texts' => [
+                        ['doc_id' => 2029, 'type' => 'Introduced', 'date' => '2018-01-05'],
+                        ['doc_id' => 2030, 'type' => 'Enrolled', 'date' => '2018-06-01'],
+                    ],
+                ],
+            ]),
+        ]);
+
+        $history = $this->driver()->billTextHistory(1132030);
+
+        $this->assertCount(2, $history);
+        $this->assertContainsOnlyInstancesOf(BillText::class, $history);
+        $this->assertSame(1132030, $history->first()->billId);
+        $this->assertNull($history->first()->content);
+    }
+
+    public function test_bill_text_fetches_content_for_the_latest_version(): void
+    {
+        $this->fakeLegiscan([
+            'getBill' => $this->okResponse([
+                'bill' => [
+                    'bill_id' => 1132030,
+                    'texts' => [
+                        ['doc_id' => 2029, 'type' => 'Introduced', 'date' => '2018-01-05'],
+                        ['doc_id' => 2030, 'type' => 'Enrolled', 'date' => '2018-06-01'],
+                    ],
+                ],
+            ]),
+            'getBillText' => $this->okResponse([
+                'text' => [
+                    'doc_id' => 2030,
+                    'bill_id' => 1132030,
+                    'type' => 'Enrolled',
+                    'doc' => base64_encode('Enrolled bill text'),
+                ],
+            ]),
+        ]);
+
+        $text = $this->driver()->billText(1132030);
+
+        $this->assertSame(2030, $text->id);
+        $this->assertSame('Enrolled bill text', $text->content);
+
+        Http::assertSent(function ($request) {
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+            return ($query['op'] ?? null) === 'getBillText' && ($query['id'] ?? null) === '2030';
+        });
+    }
+
+    public function test_bill_text_throws_when_no_versions_are_available(): void
+    {
+        $this->fakeLegiscan([
+            'getBill' => $this->okResponse([
+                'bill' => ['bill_id' => 1132030, 'texts' => []],
+            ]),
+        ]);
+
+        $this->expectException(LegiscanException::class);
+        $this->expectExceptionMessageMatches('/No text versions available/');
+
+        $this->driver()->billText(1132030);
     }
 
     public function test_get_vote_maps_roll_call(): void

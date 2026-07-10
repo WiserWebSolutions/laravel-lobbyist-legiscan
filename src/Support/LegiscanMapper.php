@@ -3,6 +3,7 @@
 namespace WiserWebSolutions\Lobbyist\Legiscan\Support;
 
 use WiserWebSolutions\Lobbyist\Data\Bill;
+use WiserWebSolutions\Lobbyist\Data\BillText;
 use WiserWebSolutions\Lobbyist\Data\Legislator;
 use WiserWebSolutions\Lobbyist\Data\Session;
 use WiserWebSolutions\Lobbyist\Data\Vote;
@@ -65,6 +66,26 @@ class LegiscanMapper
             'absent' => $payload['absent'] ?? null,
             'passed' => $payload['passed'] ?? null,
             'url' => $payload['url'] ?? $payload['state_link'] ?? '',
+            'raw' => $payload,
+        ]);
+    }
+
+    /**
+     * Maps either a `getBill`'s `texts[]` entry (no content) or a full
+     * `getBillText` response (`doc`, base64-encoded) into a normalized
+     * {@see BillText}. The latter carries `bill_id` directly; the former
+     * doesn't, so callers pass it in explicitly from the enclosing bill.
+     */
+    public static function billText(array $payload, int|string|null $billId = null): BillText
+    {
+        return new BillText(meta: [
+            'id' => $payload['doc_id'] ?? 0,
+            'bill_id' => $payload['bill_id'] ?? $billId,
+            'type' => $payload['type'] ?? '',
+            'mime' => $payload['mime'] ?? '',
+            'date' => $payload['date'] ?? null,
+            'url' => $payload['state_link'] ?? $payload['url'] ?? '',
+            'content' => isset($payload['doc']) ? base64_decode($payload['doc']) : null,
             'raw' => $payload,
         ]);
     }

@@ -60,6 +60,36 @@ class LegiscanMapperTest extends TestCase
         $this->assertTrue($vote->passed);
     }
 
+    public function test_maps_bill_text_history_entry_without_content(): void
+    {
+        $text = LegiscanMapper::billText([
+            'doc_id' => 2029,
+            'type' => 'Introduced',
+            'mime' => 'text/html',
+            'date' => '2018-01-05',
+            'state_link' => 'https://legiscan.com/CA/text/AB1/id/2029',
+        ], billId: 1132030);
+
+        $this->assertSame(2029, $text->id);
+        $this->assertSame(1132030, $text->billId);
+        $this->assertSame('Introduced', $text->type);
+        $this->assertNull($text->content);
+    }
+
+    public function test_maps_bill_text_with_decoded_content(): void
+    {
+        $text = LegiscanMapper::billText([
+            'doc_id' => 2029,
+            'bill_id' => 1132030,
+            'type' => 'Introduced',
+            'mime' => 'text/html',
+            'doc' => base64_encode('<html>Bill text</html>'),
+        ]);
+
+        $this->assertSame(1132030, $text->billId);
+        $this->assertSame('<html>Bill text</html>', $text->content);
+    }
+
     public function test_maps_legislator(): void
     {
         $legislator = LegiscanMapper::legislator([
