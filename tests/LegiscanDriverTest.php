@@ -54,6 +54,16 @@ class LegiscanDriverTest extends TestCase
         $this->assertSame(Chamber::House, $bills->first()->chamber);
     }
 
+    public function test_state_is_a_fluent_alias_for_set_state_context(): void
+    {
+        $unscoped = $this->driver();
+
+        $scoped = $unscoped->state('pa');
+
+        $this->assertSame($unscoped, $scoped);
+        $this->assertSame('PA', $scoped->stateContext());
+    }
+
     public function test_get_bill_by_id(): void
     {
         $this->fakeLegiscan([

@@ -71,6 +71,19 @@ class LegiscanDriver extends AbstractDriver implements
     // Public contract
     // ---------------------------------------------------------------------
 
+    /**
+     * Fluent alias for {@see setStateContext()}.
+     *
+     * LegiScan is the only driver with nationwide coverage, so it's the one
+     * meaningfully re-scoped after being forced by name — e.g. to query it for
+     * a state that also has a dedicated (single-state) driver installed:
+     * `Lobbyist::driver('legiscan')->state('PA')->bills()`.
+     */
+    public function state(string $state): static
+    {
+        return $this->setStateContext($state);
+    }
+
     public function sessions(): SessionCollection
     {
         $response = $this->getSessionList();
