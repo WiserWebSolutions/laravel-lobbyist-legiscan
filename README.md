@@ -49,8 +49,10 @@ $driver->bills();             // BillCollection (current CA session master list)
 $driver->bill(1132030);       // Bill (by LegiScan bill_id)
 $driver->bill('AB1');         // Bill (by number — requires state context)
 $driver->vote(55);            // Vote (by roll_call_id)
-$driver->representatives();   // LegislatorCollection (current session people)
-$driver->representative(9001); // Legislator (by people_id)
+$driver->legislators();       // LegislatorCollection (current session people, both chambers)
+$driver->representatives();   // LegislatorCollection (House only)
+$driver->senators();           // LegislatorCollection (Senate only)
+$driver->representative(9001); // Legislator (by people_id, either chamber)
 ```
 
 ### Supported capabilities

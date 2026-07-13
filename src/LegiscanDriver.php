@@ -11,8 +11,8 @@ use WiserWebSolutions\Lobbyist\Contracts\Providers\BillLookup;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\BillProvider;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\BillTextHistoryLookup;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\BillTextLookup;
+use WiserWebSolutions\Lobbyist\Contracts\Providers\LegislatorProvider;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\RepresentativeLookup;
-use WiserWebSolutions\Lobbyist\Contracts\Providers\RepresentativeProvider;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\SessionProvider;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\VoteLookup;
 use WiserWebSolutions\Lobbyist\Data\Bill;
@@ -23,6 +23,7 @@ use WiserWebSolutions\Lobbyist\Data\Legislator;
 use WiserWebSolutions\Lobbyist\Data\LegislatorCollection;
 use WiserWebSolutions\Lobbyist\Data\SessionCollection;
 use WiserWebSolutions\Lobbyist\Data\Vote;
+use WiserWebSolutions\Lobbyist\Enums\Chamber;
 use WiserWebSolutions\Lobbyist\Legiscan\Exceptions\LegiscanException;
 use WiserWebSolutions\Lobbyist\Legiscan\Support\LegiscanMapper;
 use WiserWebSolutions\Lobbyist\Support\AbstractDriver;
@@ -38,14 +39,17 @@ use WiserWebSolutions\Lobbyist\Support\AbstractDriver;
  * version of the bill's text (introduced, amended, enrolled, ...) without their
  * content, which backs {@see BillTextHistoryLookup}; fetching the actual bytes
  * for one version requires a separate `getBillText` call, made lazily by
- * {@see BillTextLookup} for just the most recent version.
+ * {@see BillTextLookup} for just the most recent version. `getSessionPeople`
+ * returns every member of the active session's legislature at once, which
+ * backs {@see LegislatorProvider::legislators()}; `senators()`/`representatives()`
+ * are just that same list filtered by chamber.
  */
 class LegiscanDriver extends AbstractDriver implements
     SessionProvider,
     BillProvider,
     BillLookup,
     VoteLookup,
-    RepresentativeProvider,
+    LegislatorProvider,
     RepresentativeLookup,
     BillTextLookup,
     BillTextHistoryLookup
@@ -135,7 +139,7 @@ class LegiscanDriver extends AbstractDriver implements
         return LegiscanMapper::vote($response['roll_call']);
     }
 
-    public function representatives(): LegislatorCollection
+    public function legislators(): LegislatorCollection
     {
         $sessionId = $this->currentSessionId();
 
@@ -154,6 +158,16 @@ class LegiscanDriver extends AbstractDriver implements
         );
     }
 
+    public function representatives(): LegislatorCollection
+    {
+        return $this->legislators()->byChamber(Chamber::House);
+    }
+
+    public function senators(): LegislatorCollection
+    {
+        return $this->legislators()->byChamber(Chamber::Senate);
+    }
+
     public function representative(string|int $identifier): Legislator
     {
         if (! is_numeric($identifier)) {
@@ -168,14 +182,7 @@ class LegiscanDriver extends AbstractDriver implements
 
     public function billTextHistory(string|int $identifier): BillTextCollection
     {
-        $bill = $this->fetchBillPayload($identifier);
-
-        return new BillTextCollection(
-            array_map(
-                fn (array $text) => LegiscanMapper::billText($text, $bill['bill_id'] ?? null),
-                $bill['texts'] ?? []
-            )
-        );
+        return $this->bill($identifier)->texts();
     }
 
     public function billText(string|int $identifier): BillText

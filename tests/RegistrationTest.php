@@ -36,7 +36,7 @@ class RegistrationTest extends TestCase
         $this->assertTrue($driver->supports(Capability::GetBill));
         $this->assertTrue($driver->supports(Capability::ListBills));
         $this->assertTrue($driver->supports(Capability::GetVote));
-        $this->assertTrue($driver->supports(Capability::ListRepresentatives));
+        $this->assertTrue($driver->supports(Capability::ListLegislators));
         $this->assertTrue($driver->supports(Capability::GetBillText));
         $this->assertTrue($driver->supports(Capability::ListBillTextHistory));
         $this->assertFalse($driver->supports(Capability::ListVotes));

@@ -212,7 +212,7 @@ class LegiscanDriverTest extends TestCase
         $this->driver()->vote('abc');
     }
 
-    public function test_list_representatives_resolves_session_then_people(): void
+    private function fakeSessionPeople(): void
     {
         $this->fakeLegiscan([
             'getSessionList' => $this->okResponse([
@@ -229,12 +229,32 @@ class LegiscanDriverTest extends TestCase
                 ],
             ]),
         ]);
+    }
 
-        $reps = $this->driver()->setStateContext('PA')->representatives();
+    public function test_legislators_resolves_session_then_people(): void
+    {
+        $this->fakeSessionPeople();
 
-        $this->assertCount(2, $reps);
-        $this->assertContainsOnlyInstancesOf(Legislator::class, $reps);
+        $legislators = $this->driver()->setStateContext('PA')->legislators();
+
+        $this->assertCount(2, $legislators);
+        $this->assertContainsOnlyInstancesOf(Legislator::class, $legislators);
+        $this->assertSame('Jane Doe', $legislators->first()->name);
+    }
+
+    public function test_representatives_and_senators_are_filtered_by_chamber(): void
+    {
+        $this->fakeSessionPeople();
+
+        $driver = $this->driver()->setStateContext('PA');
+
+        $reps = $driver->representatives();
+        $this->assertCount(1, $reps);
         $this->assertSame('Jane Doe', $reps->first()->name);
+
+        $senators = $driver->senators();
+        $this->assertCount(1, $senators);
+        $this->assertSame('John Roe', $senators->first()->name);
     }
 
     public function test_get_representative_maps_person(): void

@@ -48,6 +48,10 @@ class LegiscanMapper
             'last_action_date' => $payload['last_action_date'] ?? null,
             'url' => $payload['url'] ?? $payload['state_link'] ?? '',
             'session_id' => $payload['session_id'] ?? ($payload['session']['session_id'] ?? null),
+            'texts' => array_map(
+                fn (array $text) => self::billText($text, $payload['bill_id'] ?? null),
+                $payload['texts'] ?? []
+            ),
             'raw' => $payload,
         ]);
     }

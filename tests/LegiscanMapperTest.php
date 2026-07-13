@@ -41,6 +41,22 @@ class LegiscanMapperTest extends TestCase
         $this->assertSame('2018-12-04', $bill->lastActionDate?->format('Y-m-d'));
     }
 
+    public function test_maps_bill_texts_from_the_embedded_texts_array(): void
+    {
+        $bill = LegiscanMapper::bill([
+            'bill_id' => 1132030,
+            'number' => 'AB1',
+            'texts' => [
+                ['doc_id' => 2029, 'type' => 'Introduced', 'date' => '2018-01-05'],
+                ['doc_id' => 2030, 'type' => 'Enrolled', 'date' => '2018-06-01'],
+            ],
+        ]);
+
+        $this->assertCount(2, $bill->texts());
+        $this->assertSame(1132030, $bill->texts()->first()->billId);
+        $this->assertSame(2030, $bill->text()->id);
+    }
+
     public function test_maps_vote(): void
     {
         $vote = LegiscanMapper::vote([
