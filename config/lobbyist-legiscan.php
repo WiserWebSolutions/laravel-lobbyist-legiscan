@@ -40,6 +40,27 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Bulk Datasets
+    |--------------------------------------------------------------------------
+    |
+    | A dataset archive holds an entire session — every bill, roll call
+    | (including per-member positions) and member — and is fetched in a single
+    | request, which is dramatically cheaper against a metered key than pulling
+    | records one at a time. Archives run to tens of megabytes, so they are
+    | streamed to disk rather than buffered, and are never cached as API
+    | responses.
+    |
+    | Leave the directory null to use the system temporary directory. A download
+    | belongs to whoever requested it and should be deleted once imported.
+    |
+    */
+    'dataset' => [
+        'directory' => env('LEGISCAN_DATASET_DIR'),
+        'timeout' => (int) env('LEGISCAN_DATASET_TIMEOUT', 600),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Response Caching
     |--------------------------------------------------------------------------
     */

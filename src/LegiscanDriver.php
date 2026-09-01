@@ -7,12 +7,15 @@ use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use WiserWebSolutions\Lobbyist\Contracts\DatasetArchive;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\BillChangeProvider;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\BillLookup;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\BillProvider;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\BillTextHistoryLookup;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\BillTextLookup;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\BillVoteProvider;
+use WiserWebSolutions\Lobbyist\Contracts\Providers\DatasetLookup;
+use WiserWebSolutions\Lobbyist\Contracts\Providers\DatasetProvider;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\LegislatorProvider;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\RepresentativeLookup;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\SessionProvider;
@@ -22,6 +25,8 @@ use WiserWebSolutions\Lobbyist\Data\Bill;
 use WiserWebSolutions\Lobbyist\Data\BillCollection;
 use WiserWebSolutions\Lobbyist\Data\BillText;
 use WiserWebSolutions\Lobbyist\Data\BillTextCollection;
+use WiserWebSolutions\Lobbyist\Data\Dataset;
+use WiserWebSolutions\Lobbyist\Data\DatasetCollection;
 use WiserWebSolutions\Lobbyist\Data\Legislator;
 use WiserWebSolutions\Lobbyist\Data\LegislatorCollection;
 use WiserWebSolutions\Lobbyist\Data\SessionCollection;
@@ -29,8 +34,10 @@ use WiserWebSolutions\Lobbyist\Data\Vote;
 use WiserWebSolutions\Lobbyist\Data\VoteCollection;
 use WiserWebSolutions\Lobbyist\Enums\Chamber;
 use WiserWebSolutions\Lobbyist\Legiscan\Exceptions\LegiscanException;
+use WiserWebSolutions\Lobbyist\Legiscan\Support\DatasetDownloader;
 use WiserWebSolutions\Lobbyist\Legiscan\Support\LegiscanMapper;
 use WiserWebSolutions\Lobbyist\Support\AbstractDriver;
+use WiserWebSolutions\Lobbyist\Support\ZipDatasetArchive;
 
 /**
  * Default nationwide driver backed by the LegiScan API.
@@ -71,7 +78,9 @@ class LegiscanDriver extends AbstractDriver implements
     RepresentativeLookup,
     SponsoredBillProvider,
     BillTextLookup,
-    BillTextHistoryLookup
+    BillTextHistoryLookup,
+    DatasetProvider,
+    DatasetLookup
 {
     /** @var array{api_key: ?string, base_uri: ?string} */
     private array $endpoint;
@@ -82,14 +91,18 @@ class LegiscanDriver extends AbstractDriver implements
     /** @var array{enabled: bool, store: ?string, ttl: int} */
     private array $cache;
 
+    /** @var array{directory: ?string} */
+    private array $dataset;
+
     /**
-     * @param  array{endpoint: array, request: array, cache: array}  $config
+     * @param  array{endpoint: array, request: array, cache: array, dataset?: array}  $config
      */
     public function __construct(array $config)
     {
         $this->endpoint = $config['endpoint'] ?? [];
         $this->request = $config['request'] ?? [];
         $this->cache = $config['cache'] ?? [];
+        $this->dataset = $config['dataset'] ?? [];
 
         if (empty($this->endpoint['api_key'])) {
             throw LegiscanException::missingKey();
@@ -252,6 +265,69 @@ class LegiscanDriver extends AbstractDriver implements
         return new BillCollection($bills);
     }
 
+    public function datasets(): DatasetCollection
+    {
+        $response = $this->getDatasetList();
+
+        return new DatasetCollection(
+            array_map(
+                fn (array $entry) => LegiscanMapper::dataset($entry),
+                $response['datasetlist'] ?? []
+            )
+        );
+    }
+
+    /**
+     * Download one session archive and open it for streaming.
+     *
+     * A PA session runs to roughly 5,000 bills and as many roll calls. Fetching
+     * that through per-bill requests would cost thousands of queries against a
+     * monthly allowance; this costs one, and includes the per-member roll call
+     * detail that `getRollCall` would otherwise charge for individually.
+     *
+     * The caller owns the downloaded file and should call
+     * {@see DatasetArchive::delete()} when finished with it.
+     */
+    public function dataset(Dataset|int|string $session): DatasetArchive
+    {
+        $dataset = $session instanceof Dataset
+            ? $session
+            : $this->requireDataset($session);
+
+        if ($dataset->accessKey === null) {
+            throw LegiscanException::apiError(
+                "Dataset for session [{$dataset->sessionId}] has no access key."
+            );
+        }
+
+        // Deliberately bypasses the response cache: these payloads are tens of
+        // megabytes and caching one would be actively harmful.
+        $downloader = new DatasetDownloader($this->datasetHttp(), $this->dataset['directory'] ?? null);
+
+        $zipPath = $downloader->download(
+            query: [
+                'key' => $this->endpoint['api_key'],
+                'op' => 'getDataset',
+                'id' => $dataset->sessionId,
+                'access_key' => $dataset->accessKey,
+            ],
+            filenameHint: $dataset->state->name.'-'.$dataset->sessionId,
+        );
+
+        return new ZipDatasetArchive(
+            dataset: $dataset,
+            path: $zipPath,
+            mappers: [
+                // Archive entries mirror the API response for the same record,
+                // so the live-response mappers are reused verbatim and the two
+                // ingestion paths cannot diverge.
+                'bill' => fn (array $payload) => LegiscanMapper::bill($payload),
+                'vote' => fn (array $payload) => LegiscanMapper::vote($payload),
+                'people' => fn (array $payload) => LegiscanMapper::legislator($payload),
+            ],
+        );
+    }
+
     public function billTextHistory(string|int $identifier): BillTextCollection
     {
         return $this->bill($identifier)->texts();
@@ -324,6 +400,37 @@ class LegiscanDriver extends AbstractDriver implements
     }
 
     /**
+     * @see docs/LegiScan_API_User_Manual (getDatasetList)
+     */
+    private function getDatasetList(): array
+    {
+        $response = $this->call(
+            operation: 'getDatasetList',
+            params: ['state' => $this->stateContext ?? 'US'],
+            ttl: 60 * 60 * 6,
+        );
+
+        return $this->requireResponseKey($response, 'getDatasetList', 'datasetlist');
+    }
+
+    /**
+     * Resolve a session identifier to a listed dataset, which is also the only
+     * place its access key is published.
+     */
+    private function requireDataset(int|string $sessionId): Dataset
+    {
+        $dataset = $this->datasets()->forSession($sessionId);
+
+        if ($dataset === null) {
+            throw LegiscanException::apiError(
+                "No dataset published for session [{$sessionId}]."
+            );
+        }
+
+        return $dataset;
+    }
+
+    /**
      * @see docs/LegiScan_API_User_Manual (getSponsoredList)
      */
     private function getSponsoredList(int $personId): array
@@ -380,6 +487,21 @@ class LegiscanDriver extends AbstractDriver implements
         return Http::baseUrl($this->endpoint['base_uri'])
             ->timeout($this->request['timeout'] ?? 30)
             ->retry($this->request['retry_times'] ?? 2, $this->request['retry_sleep_ms'] ?? 200);
+    }
+
+    /**
+     * A client tuned for archive downloads rather than API calls.
+     *
+     * The standard request timeout is far too short for a transfer measured in
+     * tens of megabytes, and retrying such a transfer means downloading the
+     * whole thing again — expensive, and each attempt spends another query
+     * against the monthly allowance. So a dataset download gets a long timeout
+     * and exactly one attempt.
+     */
+    private function datasetHttp(): PendingRequest
+    {
+        return Http::baseUrl($this->endpoint['base_uri'])
+            ->timeout($this->dataset['timeout'] ?? 600);
     }
 
     protected function call(string $operation, array $params = [], ?int $ttl = null): array

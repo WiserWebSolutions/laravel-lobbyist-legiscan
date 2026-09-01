@@ -4,6 +4,7 @@ namespace WiserWebSolutions\Lobbyist\Legiscan\Support;
 
 use WiserWebSolutions\Lobbyist\Data\Bill;
 use WiserWebSolutions\Lobbyist\Data\BillText;
+use WiserWebSolutions\Lobbyist\Data\Dataset;
 use WiserWebSolutions\Lobbyist\Data\Legislator;
 use WiserWebSolutions\Lobbyist\Data\Session;
 use WiserWebSolutions\Lobbyist\Data\Vote;
@@ -39,6 +40,28 @@ class LegiscanMapper
             'prior' => (bool) ($payload['prior'] ?? false),
             'sine_die' => (bool) ($payload['sine_die'] ?? false),
             'special' => (bool) ($payload['special'] ?? false),
+            'raw' => $payload,
+        ]);
+    }
+
+    /**
+     * Maps one `getDatasetList` entry.
+     *
+     * `access_key` only appears in the listing, never in the archive response,
+     * so a dataset must be discovered here before it can be fetched.
+     */
+    public static function dataset(array $payload): Dataset
+    {
+        return new Dataset(meta: [
+            'session_id' => $payload['session_id'] ?? 0,
+            'session_name' => $payload['session_name'] ?? $payload['session_title'] ?? '',
+            'state' => self::state($payload),
+            'hash' => $payload['dataset_hash'] ?? null,
+            'date' => $payload['dataset_date'] ?? null,
+            'size' => $payload['dataset_size'] ?? null,
+            'year_start' => $payload['year_start'] ?? null,
+            'year_end' => $payload['year_end'] ?? null,
+            'access_key' => $payload['access_key'] ?? null,
             'raw' => $payload,
         ]);
     }
