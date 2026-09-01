@@ -56,4 +56,26 @@ abstract class TestCase extends Orchestra
     {
         return ['status' => 'OK'] + $data;
     }
+
+    /**
+     * The LegiScan operations actually requested, in order.
+     *
+     * Because the API is metered per query, a test often needs to assert which
+     * operations ran and how many — not just that the returned data looked
+     * right. A method that quietly costs an extra request per bill still
+     * produces correct output.
+     *
+     * @return list<string>
+     */
+    protected function requestedOps(): array
+    {
+        $ops = [];
+
+        foreach (Http::recorded() as [$request]) {
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+            $ops[] = $query['op'] ?? '';
+        }
+
+        return $ops;
+    }
 }

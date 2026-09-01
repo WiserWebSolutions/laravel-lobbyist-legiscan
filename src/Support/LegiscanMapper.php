@@ -7,15 +7,25 @@ use WiserWebSolutions\Lobbyist\Data\BillText;
 use WiserWebSolutions\Lobbyist\Data\Legislator;
 use WiserWebSolutions\Lobbyist\Data\Session;
 use WiserWebSolutions\Lobbyist\Data\Vote;
+use WiserWebSolutions\Lobbyist\Data\VoteCast;
 use WiserWebSolutions\Lobbyist\Enums\Chamber;
 use WiserWebSolutions\Lobbyist\Enums\Party;
+use WiserWebSolutions\Lobbyist\Enums\SponsorType;
 use WiserWebSolutions\Lobbyist\Enums\StateEnum;
+use WiserWebSolutions\Lobbyist\Enums\VotePosition;
 
 /**
  * Translates raw LegiScan API payloads into normalized core DTOs.
  *
  * This is the only place that knows LegiScan's field names, so core stays
  * unaware of any specific data source.
+ *
+ * Beware one genuine ambiguity in the LegiScan schema: the key `votes` means
+ * two different things depending on which payload it appears in. On a
+ * `getBill` bill it is a list of roll call summaries; on a `getRollCall` roll
+ * call it is the list of individual member votes. {@see self::bill()} reads it
+ * as the former and {@see self::vote()} as the latter, which is correct because
+ * each only ever receives its own payload type.
  */
 class LegiscanMapper
 {
@@ -35,8 +45,10 @@ class LegiscanMapper
 
     public static function bill(array $payload): Bill
     {
+        $billId = $payload['bill_id'] ?? null;
+
         return new Bill(meta: [
-            'id' => $payload['bill_id'] ?? 0,
+            'id' => $billId ?? 0,
             'number' => $payload['number'] ?? $payload['bill_number'] ?? '',
             'title' => $payload['title'] ?? '',
             'description' => $payload['description'] ?? '',
@@ -48,19 +60,34 @@ class LegiscanMapper
             'last_action_date' => $payload['last_action_date'] ?? null,
             'url' => $payload['url'] ?? $payload['state_link'] ?? '',
             'session_id' => $payload['session_id'] ?? ($payload['session']['session_id'] ?? null),
+            'change_hash' => $payload['change_hash'] ?? null,
             'texts' => array_map(
-                fn (array $text) => self::billText($text, $payload['bill_id'] ?? null),
+                fn (array $text) => self::billText($text, $billId),
                 $payload['texts'] ?? []
+            ),
+            'votes' => array_map(
+                fn (array $vote) => self::vote($vote, $billId),
+                $payload['votes'] ?? []
+            ),
+            'sponsors' => array_map(
+                fn (array $sponsor) => self::sponsor($sponsor),
+                $payload['sponsors'] ?? []
             ),
             'raw' => $payload,
         ]);
     }
 
-    public static function vote(array $payload): Vote
+    /**
+     * Maps either a `getRollCall` roll_call payload, which carries the
+     * per-member `votes` breakdown, or one of the roll call summaries embedded
+     * in a bill, which does not and has no `bill_id` of its own — so callers
+     * pass that in from the enclosing bill.
+     */
+    public static function vote(array $payload, int|string|null $billId = null): Vote
     {
         return new Vote(meta: [
             'id' => $payload['roll_call_id'] ?? $payload['id'] ?? 0,
-            'bill_id' => $payload['bill_id'] ?? null,
+            'bill_id' => $payload['bill_id'] ?? $billId,
             'chamber' => Chamber::fromString($payload['chamber'] ?? null),
             'date' => $payload['date'] ?? null,
             'description' => $payload['desc'] ?? $payload['description'] ?? '',
@@ -70,6 +97,28 @@ class LegiscanMapper
             'absent' => $payload['absent'] ?? null,
             'passed' => $payload['passed'] ?? null,
             'url' => $payload['url'] ?? $payload['state_link'] ?? '',
+            'positions' => array_map(
+                fn (array $cast) => self::voteCast($cast),
+                $payload['votes'] ?? []
+            ),
+            'raw' => $payload,
+        ]);
+    }
+
+    /**
+     * Maps one entry of a roll call `votes` array, being a single member vote.
+     *
+     * LegiScan supplies both a numeric `vote_id` (1 = Yea, 2 = Nay, ...) and a
+     * textual `vote_text`; either resolves through {@see VotePosition}.
+     */
+    public static function voteCast(array $payload): VoteCast
+    {
+        return new VoteCast(meta: [
+            'legislator_id' => $payload['people_id'] ?? $payload['id'] ?? 0,
+            'position' => VotePosition::fromString(
+                $payload['vote_id'] ?? $payload['vote_text'] ?? null
+            ),
+            'name' => $payload['name'] ?? '',
             'raw' => $payload,
         ]);
     }
@@ -96,7 +145,35 @@ class LegiscanMapper
 
     public static function legislator(array $payload): Legislator
     {
-        return new Legislator(meta: [
+        return new Legislator(meta: self::legislatorMeta($payload));
+    }
+
+    /**
+     * Maps one entry of a bill `sponsors` array.
+     *
+     * A sponsor payload is a person record plus that member relationship to
+     * one specific bill, so the sponsorship details are normalized onto the
+     * legislator `meta` rather than pretending to be attributes of the member.
+     */
+    public static function sponsor(array $payload): Legislator
+    {
+        return new Legislator(meta: self::legislatorMeta($payload) + [
+            'sponsor_type' => SponsorType::fromString($payload['sponsor_type_id'] ?? null),
+            'sponsor_order' => isset($payload['sponsor_order'])
+                ? (int) $payload['sponsor_order']
+                : null,
+        ]);
+    }
+
+    /**
+     * The shared person-field mapping behind {@see self::legislator()} and
+     * {@see self::sponsor()}, so the two can never drift apart.
+     *
+     * @return array<string, mixed>
+     */
+    private static function legislatorMeta(array $payload): array
+    {
+        return [
             'id' => $payload['people_id'] ?? $payload['id'] ?? 0,
             'name' => $payload['name'] ?? trim(($payload['first_name'] ?? '').' '.($payload['last_name'] ?? '')),
             'first_name' => $payload['first_name'] ?? '',
@@ -109,7 +186,7 @@ class LegiscanMapper
             'active' => $payload['active'] ?? null,
             'url' => $payload['ballotpedia'] ?? $payload['url'] ?? '',
             'raw' => $payload,
-        ]);
+        ];
     }
 
     /**

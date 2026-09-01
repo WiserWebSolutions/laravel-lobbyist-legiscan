@@ -7,13 +7,16 @@ use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use WiserWebSolutions\Lobbyist\Contracts\Providers\BillChangeProvider;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\BillLookup;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\BillProvider;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\BillTextHistoryLookup;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\BillTextLookup;
+use WiserWebSolutions\Lobbyist\Contracts\Providers\BillVoteProvider;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\LegislatorProvider;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\RepresentativeLookup;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\SessionProvider;
+use WiserWebSolutions\Lobbyist\Contracts\Providers\SponsoredBillProvider;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\VoteLookup;
 use WiserWebSolutions\Lobbyist\Data\Bill;
 use WiserWebSolutions\Lobbyist\Data\BillCollection;
@@ -23,6 +26,7 @@ use WiserWebSolutions\Lobbyist\Data\Legislator;
 use WiserWebSolutions\Lobbyist\Data\LegislatorCollection;
 use WiserWebSolutions\Lobbyist\Data\SessionCollection;
 use WiserWebSolutions\Lobbyist\Data\Vote;
+use WiserWebSolutions\Lobbyist\Data\VoteCollection;
 use WiserWebSolutions\Lobbyist\Enums\Chamber;
 use WiserWebSolutions\Lobbyist\Legiscan\Exceptions\LegiscanException;
 use WiserWebSolutions\Lobbyist\Legiscan\Support\LegiscanMapper;
@@ -43,14 +47,29 @@ use WiserWebSolutions\Lobbyist\Support\AbstractDriver;
  * returns every member of the active session's legislature at once, which
  * backs {@see LegislatorProvider::legislators()}; `senators()`/`representatives()`
  * are just that same list filtered by chamber.
+ *
+ * Although there is no state-wide roll call listing, the `getBill` payload does
+ * carry a `votes` array of roll call summaries, so {@see BillVoteProvider} is
+ * satisfied from a bill already in hand at no extra request. The same payload
+ * carries `sponsors`, and `getSponsoredList` inverts that into
+ * {@see SponsoredBillProvider}.
+ *
+ * LegiScan meters access by monthly query count, which makes change detection
+ * the difference between a sync that fits the budget and one that does not.
+ * Every listing row carries a `change_hash`, and `getMasterListRaw` returns
+ * those in the cheapest form available; {@see BillChangeProvider} exposes it so
+ * callers can fetch bill detail only for the bills that actually moved.
  */
 class LegiscanDriver extends AbstractDriver implements
     SessionProvider,
     BillProvider,
     BillLookup,
+    BillChangeProvider,
+    BillVoteProvider,
     VoteLookup,
     LegislatorProvider,
     RepresentativeLookup,
+    SponsoredBillProvider,
     BillTextLookup,
     BillTextHistoryLookup
 {
@@ -180,6 +199,59 @@ class LegiscanDriver extends AbstractDriver implements
         return LegiscanMapper::legislator($response['person']);
     }
 
+    /**
+     * Every bill in the session, in the cheapest form LegiScan offers.
+     *
+     * Backed by `getMasterListRaw`, so each returned bill carries little more
+     * than its identity, status and `change_hash`. That is deliberate: the
+     * point is to decide which bills are worth a full {@see Bill()} call
+     * without spending a query per bill to find out.
+     */
+    public function billChanges(): BillCollection
+    {
+        $response = $this->getMasterListRaw();
+
+        $bills = collect($response['masterlist'] ?? [])
+            ->filter(fn ($row) => is_array($row) && isset($row['bill_id']))
+            ->map(fn (array $row) => LegiscanMapper::bill($row))
+            ->values()
+            ->all();
+
+        return new BillCollection($bills);
+    }
+
+    /**
+     * The roll calls taken on one bill.
+     *
+     * These summaries ride along in the `getBill` payload, so this costs the
+     * same single query as fetching the bill. They carry the tallies but not
+     * the per-member breakdown; {@see Vote()} fetches that for one roll call.
+     */
+    public function votesForBill(string|int $identifier): VoteCollection
+    {
+        return $this->bill($identifier)->votes();
+    }
+
+    /**
+     * The bills sponsored by one legislator, by LegiScan `people_id`.
+     */
+    public function sponsoredBills(string|int $personId): BillCollection
+    {
+        if (! is_numeric($personId)) {
+            throw LegiscanException::apiError('Sponsor identifier must be numeric.');
+        }
+
+        $response = $this->getSponsoredList((int) $personId);
+
+        $bills = collect($response['sponsoredbills']['bills'] ?? [])
+            ->filter(fn ($row) => is_array($row) && isset($row['bill_id']))
+            ->map(fn (array $row) => LegiscanMapper::bill($row))
+            ->values()
+            ->all();
+
+        return new BillCollection($bills);
+    }
+
     public function billTextHistory(string|int $identifier): BillTextCollection
     {
         return $this->bill($identifier)->texts();
@@ -229,6 +301,40 @@ class LegiscanDriver extends AbstractDriver implements
         $response = $this->call(operation: 'getMasterList', params: $params, ttl: 60 * 60);
 
         return $this->requireResponseKey($response, 'getMasterList', 'masterlist');
+    }
+
+    /**
+     * The change-detection form of the master list.
+     *
+     * Same coverage as `getMasterList` but a much smaller payload per bill,
+     * built for exactly this purpose. Cached only briefly, since a stale copy
+     * would mean missing a change until the entry expired.
+     *
+     * @see docs/LegiScan_API_User_Manual (getMasterListRaw, Page 10)
+     */
+    private function getMasterListRaw(?int $sessionId = null): array
+    {
+        $params = $sessionId === null
+            ? ['state' => $this->stateContext ?? 'US']
+            : ['id' => $sessionId];
+
+        $response = $this->call(operation: 'getMasterListRaw', params: $params, ttl: 60 * 5);
+
+        return $this->requireResponseKey($response, 'getMasterListRaw', 'masterlist');
+    }
+
+    /**
+     * @see docs/LegiScan_API_User_Manual (getSponsoredList)
+     */
+    private function getSponsoredList(int $personId): array
+    {
+        $response = $this->call(
+            operation: 'getSponsoredList',
+            params: ['id' => $personId],
+            ttl: 60 * 60 * 6,
+        );
+
+        return $this->requireResponseKey($response, 'getSponsoredList', 'sponsoredbills');
     }
 
     /**
