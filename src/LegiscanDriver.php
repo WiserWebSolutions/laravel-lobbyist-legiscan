@@ -13,6 +13,7 @@ use WiserWebSolutions\Lobbyist\Contracts\Providers\BillLookup;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\BillProvider;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\BillTextHistoryLookup;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\BillTextLookup;
+use WiserWebSolutions\Lobbyist\Contracts\Providers\BillTextVersionLookup;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\BillVoteProvider;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\DatasetLookup;
 use WiserWebSolutions\Lobbyist\Contracts\Providers\DatasetProvider;
@@ -79,6 +80,7 @@ class LegiscanDriver extends AbstractDriver implements
     SponsoredBillProvider,
     BillTextLookup,
     BillTextHistoryLookup,
+    BillTextVersionLookup,
     DatasetProvider,
     DatasetLookup
 {
@@ -341,7 +343,29 @@ class LegiscanDriver extends AbstractDriver implements
             throw LegiscanException::apiError("No text versions available for bill [{$identifier}].");
         }
 
-        $response = $this->call(operation: 'getBillText', params: ['id' => $latest->id], ttl: 60 * 60 * 24);
+        return $this->billTextVersion($latest->id);
+    }
+
+    /**
+     * One specific version of a bill's text, by its document id.
+     *
+     * A single request, where reaching the same document through
+     * {@see self::billText()} costs two: that resolves the bill first to find
+     * out which version is current. A caller comparing two versions already
+     * knows both ids and should not pay to rediscover them.
+     *
+     * Cached for a day, which is generous but safe -- a published text version
+     * is immutable. An amendment produces a new document with a new id rather
+     * than editing this one.
+     */
+    public function billTextVersion(string|int $textIdentifier): BillText
+    {
+        $response = $this->call(
+            operation: 'getBillText',
+            params: ['id' => $textIdentifier],
+            ttl: 60 * 60 * 24,
+        );
+
         $this->requireResponseKey($response, 'getBillText', 'text');
 
         return LegiscanMapper::billText($response['text']);
