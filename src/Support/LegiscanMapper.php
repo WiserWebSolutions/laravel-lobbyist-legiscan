@@ -69,6 +69,7 @@ class LegiscanMapper
     public static function bill(array $payload): Bill
     {
         $billId = $payload['bill_id'] ?? null;
+        $latestAction = self::latestAction($payload);
 
         return new Bill(meta: [
             'id' => $billId ?? 0,
@@ -79,8 +80,8 @@ class LegiscanMapper
             'chamber' => Chamber::fromString($payload['body'] ?? $payload['current_body'] ?? null),
             'status' => (string) ($payload['status'] ?? ''),
             'status_date' => $payload['status_date'] ?? null,
-            'last_action' => $payload['last_action'] ?? '',
-            'last_action_date' => $payload['last_action_date'] ?? null,
+            'last_action' => $payload['last_action'] ?? $latestAction['action'],
+            'last_action_date' => $payload['last_action_date'] ?? $latestAction['date'],
             'url' => $payload['url'] ?? $payload['state_link'] ?? '',
             'session_id' => $payload['session_id'] ?? ($payload['session']['session_id'] ?? null),
             'change_hash' => $payload['change_hash'] ?? null,
@@ -98,6 +99,56 @@ class LegiscanMapper
             ),
             'raw' => $payload,
         ]);
+    }
+
+    /**
+     * The most recent action, derived from the bill's history.
+     *
+     * `getMasterList` publishes `last_action` and `last_action_date` outright,
+     * but `getBill` and the dataset archives do not — they carry a `history`
+     * array instead, and every bill in a real 4,963-bill PA session arrived
+     * with both fields absent. Without this the last action is simply lost for
+     * the two paths that actually populate a mirror.
+     *
+     * Chosen by date rather than array position, with a later position winning
+     * a tie, so an out-of-order history cannot report an old action as current.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array{action: string, date: string|null}
+     */
+    private static function latestAction(array $payload): array
+    {
+        $history = $payload['history'] ?? null;
+
+        if (! is_array($history) || $history === []) {
+            return ['action' => '', 'date' => null];
+        }
+
+        $latest = null;
+
+        foreach ($history as $entry) {
+            if (! is_array($entry)) {
+                continue;
+            }
+
+            $date = isset($entry['date']) ? (string) $entry['date'] : '';
+
+            if ($latest === null || $date >= $latest['date']) {
+                $latest = [
+                    'action' => (string) ($entry['action'] ?? $entry['full_action'] ?? ''),
+                    'date' => $date,
+                ];
+            }
+        }
+
+        if ($latest === null) {
+            return ['action' => '', 'date' => null];
+        }
+
+        return [
+            'action' => $latest['action'],
+            'date' => $latest['date'] !== '' ? $latest['date'] : null,
+        ];
     }
 
     /**
