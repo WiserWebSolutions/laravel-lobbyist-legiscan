@@ -38,9 +38,14 @@ class DatasetDownloader
     /**
      * Download the archive selected by $query and return the local ZIP path.
      *
+     * When $reuseExisting is true and a file already sits at the destination
+     * path, it is returned as-is without making a request. Callers key
+     * $filenameHint on whatever identifies a specific archive revision (e.g.
+     * the dataset hash), so a stale file is never mistaken for a current one.
+     *
      * @param  array<string, mixed>  $query
      */
-    public function download(array $query, string $filenameHint): string
+    public function download(array $query, string $filenameHint, bool $reuseExisting = false): string
     {
         $directory = $this->directory ?: sys_get_temp_dir();
 
@@ -51,6 +56,10 @@ class DatasetDownloader
         $slug = preg_replace('/[^A-Za-z0-9_-]+/', '-', $filenameHint) ?: 'dataset';
         $envelopePath = $directory.DIRECTORY_SEPARATOR.'legiscan-'.$slug.'.json.part';
         $zipPath = $directory.DIRECTORY_SEPARATOR.'legiscan-'.$slug.'.zip';
+
+        if ($reuseExisting && is_file($zipPath) && filesize($zipPath) > 0) {
+            return $zipPath;
+        }
 
         try {
             $this->fetchEnvelope($query, $envelopePath);
@@ -73,6 +82,41 @@ class DatasetDownloader
         }
 
         return $zipPath;
+    }
+
+    /**
+     * Delete every archive this downloader has left on disk, including any
+     * `.json.part` scratch file from an interrupted download.
+     *
+     * Intended for `dataset.reuse_existing`: once a database that was built
+     * from these files gets wiped, the downloaded archives are the only thing
+     * still pointing at data that no longer exists anywhere, so clearing them
+     * forces the next {@see self::download()} to fetch a fresh copy.
+     *
+     * @return int Number of files removed.
+     */
+    public function clear(): int
+    {
+        $directory = $this->directory ?: sys_get_temp_dir();
+
+        if (! is_dir($directory)) {
+            return 0;
+        }
+
+        $paths = [
+            ...glob($directory.DIRECTORY_SEPARATOR.'legiscan-*.zip') ?: [],
+            ...glob($directory.DIRECTORY_SEPARATOR.'legiscan-*.json.part') ?: [],
+        ];
+
+        $removed = 0;
+
+        foreach ($paths as $path) {
+            if (is_file($path) && @unlink($path)) {
+                $removed++;
+            }
+        }
+
+        return $removed;
     }
 
     /**

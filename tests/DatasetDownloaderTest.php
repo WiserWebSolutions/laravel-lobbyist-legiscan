@@ -175,6 +175,72 @@ class DatasetDownloaderTest extends TestCase
         );
     }
 
+    public function test_reuses_an_existing_file_instead_of_downloading_again(): void
+    {
+        $source = $this->makeZip(entries: 2);
+        $this->fakeEnvelope($source);
+
+        $first = $this->track($this->downloader()->download(['op' => 'getDataset'], 'PA-reuse', reuseExisting: true));
+
+        // No fake registered for a second call: if the downloader tried to
+        // fetch again, this would throw instead of quietly succeeding.
+        Http::fake(['api.legiscan.test/*' => function () {
+            throw new \RuntimeException('Should not have made a second request.');
+        }]);
+
+        $second = $this->downloader()->download(['op' => 'getDataset'], 'PA-reuse', reuseExisting: true);
+
+        $this->assertSame($first, $second);
+        $this->assertSame(file_get_contents($source), file_get_contents($second));
+    }
+
+    public function test_ignores_an_existing_file_when_reuse_is_not_requested(): void
+    {
+        // Seed a file at the destination path as if a previous run left it
+        // there, without ever actually requesting it.
+        $existingPath = $this->track(sys_get_temp_dir().DIRECTORY_SEPARATOR.'legiscan-PA-no-reuse.zip');
+        file_put_contents($existingPath, 'stale-placeholder');
+
+        $source = $this->makeZip(entries: 2);
+        $this->fakeEnvelope($source);
+
+        $path = $this->downloader()->download(['op' => 'getDataset'], 'PA-no-reuse');
+
+        Http::assertSentCount(1);
+        $this->assertSame(file_get_contents($source), file_get_contents($path));
+    }
+
+    public function test_clear_removes_downloaded_archives_and_leftover_scratch_files(): void
+    {
+        $source = $this->makeZip(entries: 2);
+        $this->fakeEnvelope($source);
+
+        $downloader = $this->downloader();
+        $zipPath = $this->track($downloader->download(['op' => 'getDataset'], 'PA-clear'));
+
+        // A scratch file an interrupted download left behind.
+        $partPath = $this->track(sys_get_temp_dir().DIRECTORY_SEPARATOR.'legiscan-PA-other.json.part');
+        file_put_contents($partPath, 'partial');
+
+        // Not ours to remove.
+        $unrelatedPath = $this->track(sys_get_temp_dir().DIRECTORY_SEPARATOR.'not-a-legiscan-file.zip');
+        file_put_contents($unrelatedPath, 'leave me alone');
+
+        $this->assertSame(2, $downloader->clear());
+        $this->assertFileDoesNotExist($zipPath);
+        $this->assertFileDoesNotExist($partPath);
+        $this->assertFileExists($unrelatedPath);
+    }
+
+    public function test_clear_is_a_no_op_when_nothing_has_been_downloaded(): void
+    {
+        $directory = sys_get_temp_dir().DIRECTORY_SEPARATOR.'legiscan-clear-empty-'.uniqid();
+
+        $downloader = new DatasetDownloader(Http::baseUrl('https://api.legiscan.test/')->timeout(30), $directory);
+
+        $this->assertSame(0, $downloader->clear());
+    }
+
     public function test_does_not_leave_the_scratch_envelope_behind(): void
     {
         $source = $this->makeZip();

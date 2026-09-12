@@ -53,10 +53,18 @@ return [
     | Leave the directory null to use the system temporary directory. A download
     | belongs to whoever requested it and should be deleted once imported.
     |
+    | Enabling reuse_existing skips the download entirely when a file from a
+    | previous run is already on disk for that session and dataset hash, so a
+    | database that gets wiped and rebuilt repeatedly during local development
+    | does not re-download the same archive from LegiScan every time. A file is
+    | only ever reused for the exact hash it was downloaded for; once LegiScan
+    | republishes a session under a new hash, that archive downloads fresh.
+    |
     */
     'dataset' => [
         'directory' => env('LEGISCAN_DATASET_DIR'),
         'timeout' => (int) env('LEGISCAN_DATASET_TIMEOUT', 600),
+        'reuse_existing' => env('LEGISCAN_DATASET_REUSE_EXISTING', false),
     ],
 
     /*

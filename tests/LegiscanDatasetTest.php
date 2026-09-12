@@ -117,6 +117,25 @@ class LegiscanDatasetTest extends TestCase
         $this->driver()->setStateContext('PA')->dataset(9999);
     }
 
+    public function test_clears_downloaded_dataset_archives(): void
+    {
+        $directory = sys_get_temp_dir().DIRECTORY_SEPARATOR.'legiscan-driver-clear-'.uniqid();
+        $config = array_replace_recursive(config('lobbyist-legiscan'), [
+            'dataset' => ['directory' => $directory],
+        ]);
+
+        mkdir($directory, 0775, true);
+        file_put_contents($directory.DIRECTORY_SEPARATOR.'legiscan-PA-2192-abc.zip', 'archive');
+        file_put_contents($directory.DIRECTORY_SEPARATOR.'legiscan-PA-2192-abc.json.part', 'partial');
+
+        $removed = (new LegiscanDriver($config))->clearDatasetCache();
+
+        $this->assertSame(2, $removed);
+        $this->assertFileDoesNotExist($directory.DIRECTORY_SEPARATOR.'legiscan-PA-2192-abc.zip');
+
+        rmdir($directory);
+    }
+
     public function test_driver_advertises_the_dataset_capabilities(): void
     {
         $driver = $this->driver();

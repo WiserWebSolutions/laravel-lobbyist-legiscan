@@ -93,7 +93,7 @@ class LegiscanDriver extends AbstractDriver implements
     /** @var array{enabled: bool, store: ?string, ttl: int} */
     private array $cache;
 
-    /** @var array{directory: ?string} */
+    /** @var array{directory: ?string, reuse_existing?: bool} */
     private array $dataset;
 
     /**
@@ -289,6 +289,12 @@ class LegiscanDriver extends AbstractDriver implements
      *
      * The caller owns the downloaded file and should call
      * {@see DatasetArchive::delete()} when finished with it.
+     *
+     * When `dataset.reuse_existing` is enabled, the archive is keyed by session
+     * *and* {@see Dataset::$hash}: a previously downloaded file is reused as-is,
+     * but a republished archive (new hash) still downloads fresh. Useful during
+     * local development, where the importing database gets wiped and rebuilt
+     * far more often than LegiScan actually republishes a session.
      */
     public function dataset(Dataset|int|string $session): DatasetArchive
     {
@@ -313,7 +319,8 @@ class LegiscanDriver extends AbstractDriver implements
                 'id' => $dataset->sessionId,
                 'access_key' => $dataset->accessKey,
             ],
-            filenameHint: $dataset->state->name.'-'.$dataset->sessionId,
+            filenameHint: $dataset->state->name.'-'.$dataset->sessionId.'-'.$dataset->hash,
+            reuseExisting: (bool) ($this->dataset['reuse_existing'] ?? false),
         );
 
         return new ZipDatasetArchive(
@@ -328,6 +335,23 @@ class LegiscanDriver extends AbstractDriver implements
                 'people' => fn (array $payload) => LegiscanMapper::legislator($payload),
             ],
         );
+    }
+
+    /**
+     * Delete every dataset archive this driver has downloaded to disk,
+     * including any left behind by an interrupted download.
+     *
+     * Mainly useful alongside `dataset.reuse_existing` during local
+     * development: once the database built from those archives is wiped, the
+     * files on disk are the only thing still pointing at data that no longer
+     * exists anywhere, and would otherwise get reused indefinitely instead of
+     * being re-fetched.
+     *
+     * @return int Number of files removed.
+     */
+    public function clearDatasetCache(): int
+    {
+        return (new DatasetDownloader($this->datasetHttp(), $this->dataset['directory'] ?? null))->clear();
     }
 
     public function billTextHistory(string|int $identifier): BillTextCollection
