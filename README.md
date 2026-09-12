@@ -61,6 +61,50 @@ LegiScan supports every capability **except** `ListVotes` — the API has no che
 "all votes for a state" operation (roll calls are reached per bill or by id), so
 this driver implements `VoteLookup` (`vote($id)`) but not `VoteProvider`.
 
+## Bulk Datasets
+
+Beyond per-record calls, LegiScan publishes a full session archive (every bill,
+roll call with per-member positions, and legislator) as a single download —
+dramatically cheaper against a metered key than importing a session bill by
+bill:
+
+```php
+$datasets = $driver->datasets();               // DatasetCollection for the state
+$latest = $datasets->latest();                 // most recently rebuilt archive
+$changed = $datasets->changedSince($lastHashes); // only sessions whose hash moved
+
+$archive = $driver->dataset($latest);          // downloads and opens the archive
+$archive->bills()->each(fn ($bill) => ...);    // LazyCollection, one session at a time
+$archive->votes();
+$archive->people();
+$archive->delete();                            // discard the local copy when done
+```
+
+### Reusing downloaded archives
+
+Archives run to tens of megabytes and are streamed to disk rather than
+buffered or response-cached. During local development — where the importing
+database gets wiped and rebuilt far more often than LegiScan actually
+republishes a session — it's often wasteful to re-download the same archive on
+every run. Enable `reuse_existing` to skip the download when a file from a
+previous run is already on disk for that session and dataset hash:
+
+```dotenv
+LEGISCAN_DATASET_DIR=
+LEGISCAN_DATASET_TIMEOUT=600
+LEGISCAN_DATASET_REUSE_EXISTING=true
+```
+
+A cached archive is only ever reused for the exact hash it was downloaded
+for — once LegiScan republishes the session under a new hash, it downloads
+fresh automatically.
+
+To clear the local cache entirely (e.g. after wiping your database), call:
+
+```php
+$driver->clearDatasetCache(); // int — files removed
+```
+
 ## Testing
 
 Tests use `Http::fake()` and never hit the network:
