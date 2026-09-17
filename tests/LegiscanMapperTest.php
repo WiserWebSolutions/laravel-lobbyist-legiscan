@@ -123,4 +123,40 @@ class LegiscanMapperTest extends TestCase
         $this->assertSame(Chamber::House, $legislator->chamber);
         $this->assertSame(StateEnum::PA, $legislator->state);
     }
+
+    public function test_maps_bill_history(): void
+    {
+        $bill = LegiscanMapper::bill([
+            'bill_id' => 1,
+            'bill_number' => 'HB1',
+            'state' => 'PA',
+            'history' => [
+                ['date' => '2025-01-08', 'action' => 'Referred to EDUCATION', 'chamber' => 'H', 'importance' => 0],
+                ['date' => '2025-06-24', 'action' => 'Final passage', 'chamber' => 'H', 'importance' => 1],
+            ],
+        ]);
+
+        $this->assertCount(2, $bill->history());
+        $this->assertSame('Referred to EDUCATION', $bill->history()->first()->action);
+        $this->assertSame('H', $bill->history()->first()->chamber);
+        $this->assertFalse($bill->history()->first()->importance);
+        $this->assertTrue($bill->history()->last()->importance);
+    }
+
+    public function test_maps_bill_referrals(): void
+    {
+        $bill = LegiscanMapper::bill([
+            'bill_id' => 1,
+            'bill_number' => 'HB1',
+            'state' => 'PA',
+            'referrals' => [
+                ['date' => '2025-01-08', 'committee_id' => 42, 'name' => 'Education', 'chamber' => 'H'],
+            ],
+        ]);
+
+        $this->assertCount(1, $bill->referrals());
+        $this->assertSame(42, $bill->referrals()->first()->committeeId);
+        $this->assertSame('Education', $bill->referrals()->first()->name);
+        $this->assertSame('H', $bill->referrals()->first()->chamber);
+    }
 }

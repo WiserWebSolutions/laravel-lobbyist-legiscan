@@ -3,7 +3,9 @@
 namespace WiserWebSolutions\Lobbyist\Legiscan\Support;
 
 use WiserWebSolutions\Lobbyist\Data\Bill;
+use WiserWebSolutions\Lobbyist\Data\BillHistoryEntry;
 use WiserWebSolutions\Lobbyist\Data\BillText;
+use WiserWebSolutions\Lobbyist\Data\CommitteeReferral;
 use WiserWebSolutions\Lobbyist\Data\Dataset;
 use WiserWebSolutions\Lobbyist\Data\Legislator;
 use WiserWebSolutions\Lobbyist\Data\Session;
@@ -97,8 +99,42 @@ class LegiscanMapper
                 fn (array $sponsor) => self::sponsor($sponsor),
                 $payload['sponsors'] ?? []
             ),
+            'history' => self::history($payload),
+            'referrals' => self::referrals($payload),
             'raw' => $payload,
         ]);
+    }
+
+    /**
+     * @return list<BillHistoryEntry>
+     */
+    private static function history(array $payload): array
+    {
+        return array_map(
+            fn (array $entry) => new BillHistoryEntry(meta: [
+                'action' => $entry['action'] ?? '',
+                'date' => $entry['date'] ?? null,
+                'chamber' => $entry['chamber'] ?? null,
+                'importance' => $entry['importance'] ?? false,
+            ]),
+            array_filter($payload['history'] ?? [], 'is_array')
+        );
+    }
+
+    /**
+     * @return list<CommitteeReferral>
+     */
+    private static function referrals(array $payload): array
+    {
+        return array_map(
+            fn (array $referral) => new CommitteeReferral(meta: [
+                'committee_id' => $referral['committee_id'] ?? 0,
+                'name' => $referral['name'] ?? '',
+                'chamber' => $referral['chamber'] ?? null,
+                'date' => $referral['date'] ?? null,
+            ]),
+            array_filter($payload['referrals'] ?? [], 'is_array')
+        );
     }
 
     /**
