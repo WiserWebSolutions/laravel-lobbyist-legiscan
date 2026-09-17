@@ -281,6 +281,12 @@ class LegiscanMapper
      *
      * @return array<string, mixed>
      */
+    /**
+     * LegiScan's `getPerson`/sponsor payload carries no photo, phone,
+     * email, or address field of any kind -- so unlike palegis, this leaves
+     * `image_url`/`capitol_phone`/`district_phone`/`capitol_address`/
+     * `district_address` unset by design, not by oversight.
+     */
     private static function legislatorMeta(array $payload): array
     {
         return [
