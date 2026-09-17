@@ -31,6 +31,11 @@ abstract class TestCase extends Orchestra
         $app['config']->set('lobbyist-legiscan.cache.enabled', false);
         $app['config']->set('lobbyist-legiscan.cache.store', 'array');
         $app['config']->set('lobbyist-legiscan.cache.ttl', 3600);
+
+        $app['config']->set('lobbyist-legiscan.quota.enabled', true);
+        $app['config']->set('lobbyist-legiscan.quota.store', 'array');
+        $app['config']->set('lobbyist-legiscan.quota.limit', 30000);
+        $app['config']->set('lobbyist-legiscan.quota.cache_key', 'lobbyist-legiscan:quota');
     }
 
     /**

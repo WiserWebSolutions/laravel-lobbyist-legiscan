@@ -77,4 +77,22 @@ return [
         'store' => env('LEGISCAN_CACHE_STORE', env('CACHE_STORE')),
         'ttl' => (int) env('LEGISCAN_CACHE_TTL', 3600),
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Quota Tracking
+    |--------------------------------------------------------------------------
+    |
+    | LegiScan meters API keys by query count per calendar month (30,000 on the
+    | standard plan) and does not report usage back in its responses, so this
+    | package counts its own requests. The counter resets automatically at
+    | midnight UTC on the 1st of each month.
+    |
+    */
+    'quota' => [
+        'enabled' => env('LEGISCAN_QUOTA_TRACKING_ENABLED', true),
+        'limit' => (int) env('LEGISCAN_QUOTA_LIMIT', 30000),
+        'store' => env('LEGISCAN_QUOTA_CACHE_STORE', env('CACHE_STORE')),
+        'cache_key' => env('LEGISCAN_QUOTA_CACHE_KEY', 'lobbyist-legiscan:quota'),
+    ],
 ];

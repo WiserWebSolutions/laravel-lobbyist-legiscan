@@ -34,9 +34,11 @@ use WiserWebSolutions\Lobbyist\Data\SessionCollection;
 use WiserWebSolutions\Lobbyist\Data\Vote;
 use WiserWebSolutions\Lobbyist\Data\VoteCollection;
 use WiserWebSolutions\Lobbyist\Enums\Chamber;
+use WiserWebSolutions\Lobbyist\Legiscan\Data\Quota;
 use WiserWebSolutions\Lobbyist\Legiscan\Exceptions\LegiscanException;
 use WiserWebSolutions\Lobbyist\Legiscan\Support\DatasetDownloader;
 use WiserWebSolutions\Lobbyist\Legiscan\Support\LegiscanMapper;
+use WiserWebSolutions\Lobbyist\Legiscan\Support\QuotaTracker;
 use WiserWebSolutions\Lobbyist\Support\AbstractDriver;
 use WiserWebSolutions\Lobbyist\Support\ZipDatasetArchive;
 
@@ -67,6 +69,10 @@ use WiserWebSolutions\Lobbyist\Support\ZipDatasetArchive;
  * Every listing row carries a `change_hash`, and `getMasterListRaw` returns
  * those in the cheapest form available; {@see BillChangeProvider} exposes it so
  * callers can fetch bill detail only for the bills that actually moved.
+ *
+ * Since LegiScan does not report quota usage back in its responses, this
+ * driver counts its own requests via {@see QuotaTracker} and exposes the
+ * running total through {@see self::quota()}.
  */
 class LegiscanDriver extends AbstractDriver implements
     SessionProvider,
@@ -96,8 +102,10 @@ class LegiscanDriver extends AbstractDriver implements
     /** @var array{directory: ?string, reuse_existing?: bool} */
     private array $dataset;
 
+    private QuotaTracker $quotaTracker;
+
     /**
-     * @param  array{endpoint: array, request: array, cache: array, dataset?: array}  $config
+     * @param  array{endpoint: array, request: array, cache: array, dataset?: array, quota?: array}  $config
      */
     public function __construct(array $config)
     {
@@ -113,6 +121,26 @@ class LegiscanDriver extends AbstractDriver implements
         if (empty($this->endpoint['base_uri'])) {
             throw LegiscanException::missingBaseUri();
         }
+
+        $quota = $config['quota'] ?? [];
+
+        $this->quotaTracker = new QuotaTracker(
+            enabled: (bool) ($quota['enabled'] ?? true),
+            store: $quota['store'] ?? null,
+            cacheKey: $quota['cache_key'] ?? 'lobbyist-legiscan:quota',
+            limit: (int) ($quota['limit'] ?? 30000),
+        );
+    }
+
+    /**
+     * The state of LegiScan's metered monthly query quota, as tracked locally
+     * by this driver.
+     *
+     * @see QuotaTracker
+     */
+    public function quota(): Quota
+    {
+        return $this->quotaTracker->current();
     }
 
     // ---------------------------------------------------------------------
@@ -310,7 +338,7 @@ class LegiscanDriver extends AbstractDriver implements
 
         // Deliberately bypasses the response cache: these payloads are tens of
         // megabytes and caching one would be actively harmful.
-        $downloader = new DatasetDownloader($this->datasetHttp(), $this->dataset['directory'] ?? null);
+        $downloader = new DatasetDownloader($this->datasetHttp(), $this->dataset['directory'] ?? null, $this->quotaTracker);
 
         $zipPath = $downloader->download(
             query: [
@@ -572,6 +600,8 @@ class LegiscanDriver extends AbstractDriver implements
     protected function send(array $query): array
     {
         $url = $this->attemptedUrl($query);
+
+        $this->quotaTracker->increment();
 
         try {
             $response = $this->http()->get('/', $query);

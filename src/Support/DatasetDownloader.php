@@ -33,6 +33,7 @@ class DatasetDownloader
     public function __construct(
         private readonly PendingRequest $http,
         private readonly ?string $directory = null,
+        private readonly ?QuotaTracker $quotaTracker = null,
     ) {}
 
     /**
@@ -62,6 +63,7 @@ class DatasetDownloader
         }
 
         try {
+            $this->quotaTracker?->increment();
             $this->fetchEnvelope($query, $envelopePath);
             $this->assertNotAnApiError($envelopePath);
             $this->decodeZipField($envelopePath, $zipPath);
